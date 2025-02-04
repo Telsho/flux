@@ -272,8 +272,8 @@ def main(
             torch.cuda.empty_cache()
             model = model.to(torch_device)
 
-        # denoise initial noise
-        x = denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance)
+   # denoise initial noise and capture intermediate latents
+        x, intermediate_latents = denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance)
 
         # offload model, load autoencoder to gpu
         if offload:
@@ -284,16 +284,26 @@ def main(
         # decode latents to pixel space
         x = unpack(x.float(), opts.height, opts.width)
         with torch.autocast(device_type=torch_device.type, dtype=torch.bfloat16):
-            x = ae.decode(x)
+            final_image = ae.decode(x)
+            intermediate_images = [
+                ae.decode(unpack(latent.float(), opts.height, opts.width))
+                for latent in intermediate_latents
+            ]
 
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         t1 = time.perf_counter()
 
+        # Save final image
         fn = output_name.format(idx=idx)
-        print(f"Done in {t1 - t0:.1f}s. Saving {fn}")
+        print(f"Done in {t1 - t0:.1f}s. Saving final image {fn}")
+        idx = save_image(nsfw_classifier, name, output_name, idx, final_image, add_sampling_metadata, prompt)
 
-        idx = save_image(nsfw_classifier, name, output_name, idx, x, add_sampling_metadata, prompt)
+        # Save intermediate images; here we append a suffix to the filename for each step
+        for i, img in enumerate(intermediate_images):
+            intermediate_filename = os.path.join(output_dir, f"img_{idx}_step_{i}.jpg")
+            print(f"Saving intermediate image {intermediate_filename}")
+            idx = save_image(nsfw_classifier, name, intermediate_filename, idx, img, add_sampling_metadata, prompt)
 
         if loop:
             print("-" * 80)
@@ -306,6 +316,7 @@ def main(
 
     if trt:
         trt_ctx_manager.stop_runtime()
+
 
 
 def app():
