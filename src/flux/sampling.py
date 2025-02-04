@@ -254,6 +254,8 @@ def denoise(
 ):
     # this is ignored for schnell
     guidance_vec = torch.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
+    intermediate_states = []
+    
     for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
         t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
         pred = model(
@@ -267,8 +269,9 @@ def denoise(
         )
 
         img = img + (t_prev - t_curr) * pred
+        intermediate_states.append(img.clone())
 
-    return img
+    return img, intermediate_states
 
 
 def unpack(x: Tensor, height: int, width: int) -> Tensor:
